@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <memory>
@@ -202,24 +203,30 @@ public:
             RawMemory<T> new_data{size_ == 0 ? 1 : 2 * size_};
             new(new_data + offset)T(std::forward<Types>(value)...);
             try {
+                /*
                 if constexpr(std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
                     std::uninitialized_move_n(begin(), offset, new_data.GetAddress());
                 }
                 else {
                     std::uninitialized_copy_n(begin(), offset, new_data.GetAddress());
                 }
+                */
+                RealocateElements(begin(), offset, new_data.GetAddress());
             }
             catch(...) {
                 std::destroy_at(new_data + offset);
                 throw;
             }
             try {
+                /*
                 if constexpr(std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
                     std::uninitialized_move_n(begin() + offset, size_ - offset, new_data + offset + 1u);
                 }
                 else {
                     std::uninitialized_copy_n(begin() + offset, size_ - offset, new_data + offset + 1u);
                 }
+                */
+                RealocateElements(begin() + offset, size_ - offset, new_data + offset + 1u);
             }
             catch(...) {
                 std::destroy_n(new_data.GetAddress(), offset + 1u);
@@ -235,6 +242,7 @@ public:
 private:
     RawMemory<T> data_;
     size_t size_ = 0;
+    void RealocateElements(const T* from, size_t count, const T* to);
 };
 
 template<typename T>
@@ -293,16 +301,11 @@ Vector<T>& Vector<T>::operator=(const Vector<T>& other) {
             Swap(temp_vector);
         }
         else {
+            std::copy_n(other.begin(), other.size_, begin());
             if(other.size_ < size_) {
-                for(size_t i = 0; i < other.size_; ++i) {
-                    *(data_ + i) = other[i];
-                }
                 std::destroy_n(data_ + other.size_, size_ - other.size_);
             }
             else {
-                for(size_t i = 0; i < size_; ++i) {
-                    *(data_ + i) = other[i];
-                }
                 std::uninitialized_copy_n(other.data_ + size_, other.size_ - size_, data_ + size_);
             }
             size_ = other.size_;
@@ -331,12 +334,15 @@ void Vector<T>::Reserve(size_t new_capacity) {
         return;
     }
     RawMemory<T> new_data_ptr{new_capacity};
+    /*
     if constexpr(std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
         std::uninitialized_move_n(data_.GetAddress(), size_, new_data_ptr.GetAddress());
     }
     else {
         std::uninitialized_copy_n(data_.GetAddress(), size_, new_data_ptr.GetAddress());
     }
+    */
+    RealocateElements(data_.GetAddress(), size_, new_data_ptr.GetAddress());
     new_data_ptr.Swap(data_);
     std::destroy_n(data_.GetAddress(), size_);
 }
@@ -372,15 +378,17 @@ void Vector<T>::PushBack(const T& value) {
     }
     else {
         RawMemory<T> new_data{size_ == 0 ? 1 : 2 * size_};
-        
         try{
             new(new_data + size_)T{value};
+            /*
             if constexpr(std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
                 std::uninitialized_move_n(data_.GetAddress(), size_, new_data.GetAddress());
             }
             else {
                 std::uninitialized_copy_n(data_.GetAddress(), size_, new_data.GetAddress());
             }
+            */
+            RealocateElements(data_.GetAddress(), size_, new_data.GetAddress());
         }
         catch(...) {
             std::destroy_n(new_data.GetAddress(), size_ + 1);
@@ -406,27 +414,25 @@ void Vector<T>::PushBack(T&& value) {
     }
     else {
         RawMemory<T> new_data{size_ == 0 ? 1 : 2 * size_};
-        
         try {
             new(new_data + size_)T{std::move(value)};
+            /*
             if constexpr(std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
-                
                 std::uninitialized_move_n(data_.GetAddress(), size_, new_data.GetAddress());
             }
-            
-            else {
-                
+            else {  
                 std::uninitialized_copy_n(data_.GetAddress(), size_, new_data.GetAddress());
             }
+            */
+            RealocateElements(data_.GetAddress(), size_, new_data.GetAddress());
         }
         catch(...) {
             std::destroy_n(new_data.GetAddress(), size_ + 1);
             throw;
         }
-            
-            data_.Swap(new_data);
-            std::destroy_n(new_data.GetAddress(), size_);
-        }
+        data_.Swap(new_data);
+        std::destroy_n(new_data.GetAddress(), size_);
+    }
     ++size_;
 }
 
@@ -452,4 +458,14 @@ typename Vector<T>::iterator Vector<T>::Erase(const_iterator pos) noexcept {
     std::destroy_at(end() - 1u);
     --size_;
     return begin() + offset;
+}
+
+template<typename T>
+void Vector<T>::RealocateElements(const T* from, size_t count, const T* to) {
+    if constexpr(std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
+        std::uninitialized_move_n(from, count, to);
+    }
+    else {
+        std::uninitialized_copy_n(from, count, to);
+    }
 }
